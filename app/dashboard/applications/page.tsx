@@ -1,3 +1,43 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { FileText, RefreshCw, ArrowRight } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard/DashboardShell'
-export default function Applications(){return <DashboardShell><h1 className="text-3xl font-black">My Applications</h1><p className="mt-2 text-sm text-[#6b756f]">Track your TechVision training applications.</p><section className="mt-10 flex flex-col gap-5 border border-[#dce5df] bg-white p-7 sm:flex-row sm:items-center"><div className="flex-1"><h2 className="text-lg font-black">Front-End Development Bootcamp</h2><p className="mt-2 text-sm text-[#6b756f]">Batch 21 • Submitted Aug 26, 2026</p><p className="mt-6 text-sm">Mode: In-person &nbsp;&nbsp; Schedule: Evening</p></div><span className="w-fit rounded-full bg-[#fff4d8] px-4 py-2 text-xs font-bold text-[#9b6500]">Under Review</span><Link href="/dashboard/applications/frontend" className="font-bold text-[#168452]">View →</Link></section><h2 className="mt-12 text-xl font-black">Application Process</h2><section className="mt-5 border border-[#dce5df] bg-white p-8"><div className="grid grid-cols-2 gap-6 sm:grid-cols-4">{[['✓','Submitted','bg-[#00d38d] text-white'],['2','Under Review','bg-[#fff4d8] text-[#9b6500]'],['3','Decision','bg-white text-[#6b756f]'],['4','Enrollment','bg-white text-[#6b756f]']].map(([n,l,c])=><div key={l} className="text-center"><div className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-[#bbc5bf] ${c}`}>{n}</div><div className="mt-3 text-xs font-bold">{l}</div></div>)}</div></section></DashboardShell>}
+
+export default function Applications() {
+  const [authenticated, setAuthenticated] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  async function load() {
+    setLoading(true)
+    setError('')
+    try {
+      const response = await fetch('/api/auth/me', { cache: 'no-store' })
+      const data = await response.json()
+      if (response.status === 401) { window.location.assign('/login'); return }
+      if (!response.ok || !data.authenticated) throw new Error('Could not verify your LMS account.')
+      setAuthenticated(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load your applications.')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  return <DashboardShell>
+    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+      <div><h1 className="text-3xl font-black">My Applications</h1><p className="mt-2 text-sm text-[#6b756f]">Check your training application information.</p></div>
+      <button onClick={() => void load()} disabled={loading} className="inline-flex w-fit items-center gap-2 rounded-xl border border-[#dce5df] bg-white px-4 py-2.5 text-sm font-bold"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Refresh</button>
+    </div>
+    {error && <p role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
+    <section className="mt-8 rounded-2xl border border-dashed border-[#cfded4] bg-white px-6 py-12 text-center">
+      <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e8fbf1] text-[#168452]"><FileText size={25} /></div>
+      <h2 className="mt-5 text-lg font-extrabold">{loading ? 'Checking your account…' : authenticated ? 'Application tracking is not connected yet' : 'Sign in to view applications'}</h2>
+      <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[#718077]">{loading ? 'We are checking your TechVision LMS session.' : 'This dashboard does not yet have access to training-application records, so it will not show invented application statuses. You can continue to TechVision LMS to view available learning and application options.'}</p>
+      {!loading && authenticated && <a href="https://learn.techvision.edu.et" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#00d38d] px-5 py-3 text-sm font-extrabold text-[#062719]">Open TechVision LMS <ArrowRight size={16} /></a>}
+      {!loading && !authenticated && <Link href="/login" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#00d38d] px-5 py-3 text-sm font-extrabold text-[#062719]">Sign in <ArrowRight size={16} /></Link>}
+    </section>
+  </DashboardShell>
+}
