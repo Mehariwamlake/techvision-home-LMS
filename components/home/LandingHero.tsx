@@ -44,7 +44,7 @@ export function LandingHero() {
           className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row"
         >
           <Link
-            href="https://learn.techvision.edu.et/login"
+            href="/login"
             className="flex min-w-48 items-center justify-center gap-2 bg-[#00d38d] px-7 py-4 text-sm font-semibold text-[#0b1510] transition-transform duration-200 hover:-translate-y-0.5"
           >
             Start Learning <ArrowRight size={16} />

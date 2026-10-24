@@ -20,7 +20,6 @@ export async function GET() {
 
   try {
     const base = frappeUrl()
-    const user = encodeURIComponent(session.user)
     const profileUrl = base + '/api/method/frappe.client.get_value?doctype=User&filters=' +
       encodeURIComponent(JSON.stringify({ name: session.user })) +
       '&fieldname=' + encodeURIComponent(JSON.stringify(['full_name', 'user_image']))
