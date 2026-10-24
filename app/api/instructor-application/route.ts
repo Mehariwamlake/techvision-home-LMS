@@ -1,111 +1,76 @@
 import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 function clean(value: unknown, max = 3000) {
   return String(value ?? '').trim().slice(0, max)
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[char] || char)
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
 
-    // Honeypot: quietly accept bot submissions without storing them.
-    if (clean(body.companyWebsite, 200)) {
-      return NextResponse.json({ ok: true })
+    // Honeypot: accept bot submissions without forwarding them.
+    if (clean(body.companyWebsite, 200)) return NextResponse.json({ ok: true })
+
+    const application = {
+      type: 'instructor_application',
+      fullName: clean(body.fullName, 120),
+      email: clean(body.email, 180).toLowerCase(),
+      phone: clean(body.phone, 40),
+      expertise: clean(body.expertise, 120),
+      experience: clean(body.experience, 80),
+      format: clean(body.format, 100),
+      portfolio: clean(body.portfolio, 300),
+      message: clean(body.message, 3000),
+      submittedAt: new Date().toISOString(),
     }
 
-    const fullName = clean(body.fullName, 120)
-    const email = clean(body.email, 180).toLowerCase()
-    const phone = clean(body.phone, 40)
-    const expertise = clean(body.expertise, 120)
-    const experience = clean(body.experience, 80)
-    const format = clean(body.format, 100)
-    const portfolio = clean(body.portfolio, 300)
-    const message = clean(body.message, 3000)
-
-    if (fullName.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phone.length < 7 || !expertise || !experience || !format || message.length < 20) {
+    if (
+      application.fullName.length < 2 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(application.email) ||
+      application.phone.length < 7 ||
+      !application.expertise ||
+      !application.experience ||
+      !application.format ||
+      application.message.length < 20
+    ) {
       return NextResponse.json({ error: 'Please complete all required fields with valid details.' }, { status: 400 })
     }
 
-    const baseUrl = process.env.ERPNEXT_URL?.replace(/\/+$/, '')
-    const apiKey = process.env.ERPNEXT_API_KEY
-    const apiSecret = process.env.ERPNEXT_API_SECRET
-
-    if (!baseUrl || !apiKey || !apiSecret) {
-      console.error('[instructor-application] ERPNext integration is not configured')
-      return NextResponse.json({ error: 'The application form is not connected yet. Please try again later or email info@techvision.edu.et.' }, { status: 503 })
+    // Forward only to an explicitly configured instructor-application destination.
+    // No ERP/CRM is assumed or contacted by this route.
+    const destination = process.env.INSTRUCTOR_APPLICATION_WEBHOOK_URL
+    if (!destination) {
+      console.error('[instructor-application] INSTRUCTOR_APPLICATION_WEBHOOK_URL is not configured')
+      return NextResponse.json({
+        error: 'The application form is not connected to the instructor application inbox yet. Please email info@techvision.edu.et while we finish setup.',
+      }, { status: 503 })
     }
 
-    const headers = {
-      Authorization: 'token ' + apiKey + ':' + apiSecret,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
+    let endpoint: URL
+    try {
+      endpoint = new URL(destination)
+      if (endpoint.protocol !== 'https:' && process.env.NODE_ENV === 'production') throw new Error('HTTPS is required')
+    } catch {
+      return NextResponse.json({ error: 'The instructor application service is configured incorrectly. Please try again later.' }, { status: 503 })
     }
 
-    const leadResponse = await fetch(baseUrl + '/api/resource/Lead', {
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(application),
       cache: 'no-store',
-      body: JSON.stringify({
-        doctype: 'Lead',
-        lead_name: fullName,
-        email_id: email,
-        mobile_no: phone,
-        source: 'Website',
-        job_title: 'Instructor Application — ' + expertise,
-        website: portfolio || undefined,
-      }),
-    })
-    const leadPayload = await leadResponse.json().catch(() => ({}))
-
-    if (!leadResponse.ok || !leadPayload?.data?.name) {
-      console.error('[instructor-application] ERPNext rejected Lead creation', { status: leadResponse.status })
-      return NextResponse.json({ error: 'We could not save your application right now. Please try again shortly.' }, { status: 502 })
-    }
-
-    const leadName = String(leadPayload.data.name)
-    const details = [
-      'Instructor application received from the TechVision website.',
-      '',
-      'Teaching area: ' + expertise,
-      'Experience: ' + experience,
-      'Preferred format: ' + format,
-      'Portfolio: ' + (portfolio || 'Not provided'),
-      '',
-      'Course idea / teaching approach:',
-      message,
-    ].join('\n')
-
-    const commentResponse = await fetch(baseUrl + '/api/resource/Comment', {
-      method: 'POST',
-      headers,
-      cache: 'no-store',
-      body: JSON.stringify({
-        doctype: 'Comment',
-        comment_type: 'Comment',
-        reference_doctype: 'Lead',
-        reference_name: leadName,
-        content: '<pre style="white-space:pre-wrap;font-family:inherit">' + escapeHtml(details) + '</pre>',
-      }),
+      signal: AbortSignal.timeout(10000),
     })
 
-    if (!commentResponse.ok) {
-      console.error('[instructor-application] ERPNext could not attach application details', { lead: leadName, status: commentResponse.status })
-      return NextResponse.json({ error: 'Your contact was saved, but some application details could not be attached. Please email info@techvision.edu.et and mention reference ' + leadName + '.' }, { status: 502 })
+    if (!response.ok) {
+      console.error('[instructor-application] Destination rejected submission', { status: response.status })
+      return NextResponse.json({ error: 'We could not submit your application right now. Please try again shortly.' }, { status: 502 })
     }
 
-    return NextResponse.json({ ok: true, name: leadName })
+    return NextResponse.json({ ok: true, submittedAt: application.submittedAt })
   } catch {
     return NextResponse.json({ error: 'Something went wrong while sending your application. Please try again.' }, { status: 500 })
   }
