@@ -48,6 +48,7 @@ export async function POST(request: Request) {
     const loginMessage = String(payload?.message || '').trim().toLowerCase()
 
     // Some Frappe accounts have no Desk home app. Verify the session instead
+    // of treating every response other than "Logged In" as bad credentials.
     // of treating every response other than "Logged In" as a bad password.
     if (!login.ok) {
       console.warn('[auth] Frappe login HTTP failure', { status: login.status, message: loginMessage || 'no message' })
