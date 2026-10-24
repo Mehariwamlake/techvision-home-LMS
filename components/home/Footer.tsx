@@ -11,6 +11,7 @@ export function Footer({ compact = false }: { compact?: boolean }) {
           <Link href="/stories">Stories</Link>
           <Link href="/#faq">FAQ</Link>
           <Link href="/pricing">Pricing</Link>
+          <Link href="/instructors/apply">Teach with us</Link>
           <Link href="/login">Login</Link>
         </div>
         <p className="text-xs text-[#68736d]">
