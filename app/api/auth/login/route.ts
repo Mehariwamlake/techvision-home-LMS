@@ -3,31 +3,66 @@ import { frappeUrl, sealSession, SESSION_COOKIE, sessionCookieOptions, sessionTt
 
 export const runtime = 'nodejs'
 
+function getSessionId(headers: Headers) {
+  // Node's fetch implementation supports getSetCookie() in current Node releases.
+  const setCookies = typeof headers.getSetCookie === 'function'
+    ? headers.getSetCookie()
+    : [headers.get('set-cookie') || '']
+
+  for (const cookie of setCookies) {
+    const match = cookie.match(/(?:^|[,;\\s])sid=([^;,\\s]+)/)
+    if (match?.[1]) return match[1]
+  }
+  return undefined
+}
+
 export async function POST(request: Request) {
   let email = ''
   let password = ''
   try {
     const body = await request.json()
-    email = String(body.email || '').trim()
+    email = String(body.email || body.username || '').trim()
     password = String(body.password || '')
   } catch { return NextResponse.json({ error: 'Enter your email and password.' }, { status: 400 }) }
   if (!email || !password) return NextResponse.json({ error: 'Enter your email and password.' }, { status: 400 })
+
   try {
     const login = await fetch(`${frappeUrl()}/api/method/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: new URLSearchParams({ usr: email, pwd: password }), cache: 'no-store',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: new URLSearchParams({ usr: email, pwd: password }),
+      cache: 'no-store',
     })
     const payload = await login.json().catch(() => ({}))
-    const cookies = login.headers.get('set-cookie') || ''
-    const sidMatch = cookies.match(/sid=([^;]+)/)
-    const sid = sidMatch?.[1]
-    if (!login.ok || !sid || payload?.message !== 'Logged In') return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
-    const verify = await fetch(`${frappeUrl()}/api/method/frappe.auth.get_logged_user`, { headers: { Cookie: `sid=${sid}` }, cache: 'no-store' })
+    const sid = getSessionId(login.headers)
+    const loginMessage = String(payload?.message || '').trim().toLowerCase()
+
+    if (!login.ok || loginMessage !== 'logged in') {
+      // Do not log credentials, cookies, or session identifiers.
+      console.warn('[auth] Frappe login rejected', { status: login.status, message: loginMessage || 'no message' })
+      return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
+    }
+
+    if (!sid) {
+      console.error('[auth] Frappe login succeeded but no sid cookie was returned', { status: login.status })
+      return NextResponse.json({ error: 'LMS login succeeded, but the session could not be established. Please try again.' }, { status: 502 })
+    }
+
+    const verify = await fetch(`${frappeUrl()}/api/method/frappe.auth.get_logged_user`, {
+      headers: { Cookie: `sid=${sid}` },
+      cache: 'no-store',
+    })
     const userPayload = await verify.json().catch(() => ({}))
     const user = userPayload?.message
-    if (!verify.ok || !user || user === 'Guest') return NextResponse.json({ error: 'Unable to verify your LMS account.' }, { status: 401 })
+    if (!verify.ok || !user || user === 'Guest') {
+      console.warn('[auth] Frappe session verification failed', { status: verify.status })
+      return NextResponse.json({ error: 'Unable to verify your LMS account.' }, { status: 401 })
+    }
+
     const response = NextResponse.json({ ok: true, user })
     response.cookies.set(SESSION_COOKIE, sealSession({ sid, user, expiresAt: Date.now() + sessionTtlSeconds * 1000 }), sessionCookieOptions())
     return response
-  } catch { return NextResponse.json({ error: 'The LMS is unavailable. Please try again.' }, { status: 502 }) }
+  } catch {
+    return NextResponse.json({ error: 'The LMS is unavailable. Please try again.' }, { status: 502 })
+  }
 }
